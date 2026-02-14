@@ -25,12 +25,15 @@ from modules.rag_engine import generate_answer
 
 NAMESPACE = "abstract"
 
+BASE_DATA_PATH = Path("data/abstract")
+BASE_DATA_PATH.mkdir(parents=True, exist_ok=True)
+
 HISTORY_DIR = Path("data/processed/abstract")
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 HISTORY_FILE = HISTORY_DIR / "query_history.json"
 
 
-st.title("📄 Abstract Journal GraphRAG (CSV)")
+st.title("📄 Abstract Journal GraphRAG (Dataset Manager)")
 
 
 # =================================================
@@ -45,7 +48,7 @@ embedding_model = load_embedding_model()
 
 
 # =================================================
-# SAFE SESSION INIT
+# SESSION INIT
 # =================================================
 
 if "abstract_index" not in st.session_state:
@@ -59,54 +62,100 @@ if "abstract_graph" not in st.session_state:
 
 
 # =================================================
-# CSV UPLOAD
+# DATASET SELECTION
 # =================================================
 
-uploaded_file = st.file_uploader("Upload CSV with Abstracts", type=["csv"])
+st.sidebar.header("📂 Dataset Manager")
+
+# List available dataset folders
+available_folders = [
+    f.name for f in BASE_DATA_PATH.iterdir()
+    if f.is_dir()
+]
+
+selected_folders = st.sidebar.multiselect(
+    "Select dataset folders",
+    available_folders
+)
+
+# Collect CSV files from selected folders
+selected_csv_files = []
+
+for folder in selected_folders:
+    folder_path = BASE_DATA_PATH / folder
+    csv_files = list(folder_path.glob("*.csv"))
+    selected_csv_files.extend(csv_files)
+
+
+# =================================================
+# CSV UPLOAD (Stored Locally)
+# =================================================
+
+uploaded_file = st.sidebar.file_uploader(
+    "Upload new CSV",
+    type=["csv"]
+)
 
 if uploaded_file:
 
-    df = pd.read_csv(uploaded_file)
+    upload_folder = BASE_DATA_PATH / "uploaded"
+    upload_folder.mkdir(exist_ok=True)
 
-    if "Abstract" not in df.columns:
-        st.error("CSV must contain an 'Abstract' column.")
-        st.stop()
+    save_path = upload_folder / uploaded_file.name
 
-    documents = []
+    with open(save_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
 
-    for _, row in df.iterrows():
+    st.sidebar.success(f"Saved to {save_path}")
 
-        abstract_text = row["Abstract"]
+    selected_csv_files.append(save_path)
 
-        if pd.isna(abstract_text) or abstract_text == "(missing abstract)":
+
+# =================================================
+# BUILD INDEX BUTTON
+# =================================================
+
+if st.sidebar.button("🔄 Build / Rebuild Index"):
+
+    all_documents = []
+
+    for csv_path in selected_csv_files:
+
+        df = pd.read_csv(csv_path)
+
+        if "Abstract" not in df.columns:
             continue
 
-        documents.append({
-            "doc_id": row.get("DOI", "Unknown DOI"),
-            "page": row.get("Year", 0),
-            "text": abstract_text,
-            "title": row.get("Title", ""),
-            "authors": row.get("Authors", ""),
-            "journal": row.get("Journal", "")
-        })
+        for _, row in df.iterrows():
 
-    if len(documents) == 0:
-        st.warning("No valid abstracts found in CSV.")
+            abstract_text = row["Abstract"]
+
+            if pd.isna(abstract_text) or abstract_text == "(missing abstract)":
+                continue
+
+            all_documents.append({
+                "doc_id": row.get("DOI", csv_path.stem),
+                "page": row.get("Year", 0),
+                "text": abstract_text,
+                "title": row.get("Title", ""),
+                "authors": row.get("Authors", ""),
+                "journal": row.get("Journal", "")
+            })
+
+    if len(all_documents) == 0:
+        st.warning("No valid abstracts found.")
     else:
 
-        new_chunks = chunk_documents(documents)
+        new_chunks = chunk_documents(all_documents)
 
         index, chunks = build_or_update_index(
-            index=st.session_state.abstract_index,
-            existing_chunks=st.session_state.abstract_chunks or [],
+            index=None,  # rebuild fresh
+            existing_chunks=[],
             new_chunks=new_chunks,
             embedding_model=embedding_model
         )
 
-        graph = build_or_update_graph(
-            st.session_state.abstract_graph,
-            new_chunks
-        )
+        graph = build_or_update_graph(None, new_chunks)
 
         save_index(index, NAMESPACE)
         save_chunks(chunks, NAMESPACE)
@@ -116,19 +165,19 @@ if uploaded_file:
         st.session_state.abstract_chunks = chunks
         st.session_state.abstract_graph = graph
 
-        st.success(f"✅ Indexed {len(documents)} abstracts successfully!")
+        st.success(f"✅ Indexed {len(all_documents)} abstracts.")
 
 
 # =================================================
-# QUERY SECTION
+# QUERY
 # =================================================
 
-query = st.text_input("Ask about the uploaded abstracts")
+query = st.text_input("Ask about selected abstracts")
 
 if query:
 
     if st.session_state.abstract_index is None:
-        st.warning("⚠️ No abstracts indexed yet.")
+        st.warning("⚠️ Build the index first.")
     else:
 
         provider = "lmstudio"
@@ -175,6 +224,7 @@ if query:
             "model": model,
             "temperature": temperature,
             "top_k": top_k,
+            "datasets_used": selected_folders,
             "response": response,
             "sources": [
                 {
@@ -186,7 +236,6 @@ if query:
             ]
         }
 
-        # Append to history file
         if HISTORY_FILE.exists():
             with open(HISTORY_FILE, "r") as f:
                 history = json.load(f)
@@ -199,6 +248,209 @@ if query:
             json.dump(history, f, indent=2)
 
         st.success("📁 Query stored in history.")
+
+
+# import streamlit as st
+# import pandas as pd
+# from sentence_transformers import SentenceTransformer
+# from datetime import datetime
+# import json
+# from pathlib import Path
+
+# from modules.chunker import chunk_documents
+# from modules.vector_store import build_or_update_index
+# from modules.graph_builder import build_or_update_graph
+# from modules.persistence import (
+#     load_index,
+#     save_index,
+#     load_chunks,
+#     save_chunks,
+#     load_graph,
+#     save_graph
+# )
+# from modules.rag_engine import generate_answer
+
+
+# # =================================================
+# # CONFIG
+# # =================================================
+
+# NAMESPACE = "abstract"
+
+# HISTORY_DIR = Path("data/processed/abstract")
+# HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+# HISTORY_FILE = HISTORY_DIR / "query_history.json"
+
+
+# st.title("📄 Abstract Journal GraphRAG (CSV)")
+
+
+# # =================================================
+# # LOAD EMBEDDING MODEL
+# # =================================================
+
+# @st.cache_resource
+# def load_embedding_model():
+#     return SentenceTransformer("all-MiniLM-L6-v2")
+
+# embedding_model = load_embedding_model()
+
+
+# # =================================================
+# # SAFE SESSION INIT
+# # =================================================
+
+# if "abstract_index" not in st.session_state:
+#     st.session_state.abstract_index = load_index(NAMESPACE)
+
+# if "abstract_chunks" not in st.session_state:
+#     st.session_state.abstract_chunks = load_chunks(NAMESPACE)
+
+# if "abstract_graph" not in st.session_state:
+#     st.session_state.abstract_graph = load_graph(NAMESPACE)
+
+
+# # =================================================
+# # CSV UPLOAD
+# # =================================================
+
+# uploaded_file = st.file_uploader("Upload CSV with Abstracts", type=["csv"])
+
+# if uploaded_file:
+
+#     df = pd.read_csv(uploaded_file)
+
+#     if "Abstract" not in df.columns:
+#         st.error("CSV must contain an 'Abstract' column.")
+#         st.stop()
+
+#     documents = []
+
+#     for _, row in df.iterrows():
+
+#         abstract_text = row["Abstract"]
+
+#         if pd.isna(abstract_text) or abstract_text == "(missing abstract)":
+#             continue
+
+#         documents.append({
+#             "doc_id": row.get("DOI", "Unknown DOI"),
+#             "page": row.get("Year", 0),
+#             "text": abstract_text,
+#             "title": row.get("Title", ""),
+#             "authors": row.get("Authors", ""),
+#             "journal": row.get("Journal", "")
+#         })
+
+#     if len(documents) == 0:
+#         st.warning("No valid abstracts found in CSV.")
+#     else:
+
+#         new_chunks = chunk_documents(documents)
+
+#         index, chunks = build_or_update_index(
+#             index=st.session_state.abstract_index,
+#             existing_chunks=st.session_state.abstract_chunks or [],
+#             new_chunks=new_chunks,
+#             embedding_model=embedding_model
+#         )
+
+#         graph = build_or_update_graph(
+#             st.session_state.abstract_graph,
+#             new_chunks
+#         )
+
+#         save_index(index, NAMESPACE)
+#         save_chunks(chunks, NAMESPACE)
+#         save_graph(graph, NAMESPACE)
+
+#         st.session_state.abstract_index = index
+#         st.session_state.abstract_chunks = chunks
+#         st.session_state.abstract_graph = graph
+
+#         st.success(f"✅ Indexed {len(documents)} abstracts successfully!")
+
+
+# # =================================================
+# # QUERY SECTION
+# # =================================================
+
+# query = st.text_input("Ask about the uploaded abstracts")
+
+# if query:
+
+#     if st.session_state.abstract_index is None:
+#         st.warning("⚠️ No abstracts indexed yet.")
+#     else:
+
+#         provider = "lmstudio"
+#         model = "mistralai/ministral-3-3b"
+#         temperature = 0.2
+#         top_k = 5
+
+#         result = generate_answer(
+#             query=query,
+#             vector_index=st.session_state.abstract_index,
+#             documents=st.session_state.abstract_chunks,
+#             embedding_model=embedding_model,
+#             provider=provider,
+#             model=model,
+#             temperature=temperature,
+#             top_k=top_k
+#         )
+
+#         response = result["response"]
+#         sources = result["sources"]
+#         scores = result["scores"]
+
+#         st.write("### 🧠 Answer")
+#         st.write(response)
+
+#         with st.expander("📚 Sources Used"):
+
+#             for i, s in enumerate(sources):
+
+#                 st.markdown(f"""
+# **DOI:** {s['doc_id']}  
+# **Year:** {s['page']}  
+# **Score:** {scores[i]:.4f}  
+# """)
+
+#         # =================================================
+#         # STORE QUERY HISTORY
+#         # =================================================
+
+#         history_entry = {
+#             "timestamp": datetime.utcnow().isoformat(),
+#             "query": query,
+#             "provider": provider,
+#             "model": model,
+#             "temperature": temperature,
+#             "top_k": top_k,
+#             "response": response,
+#             "sources": [
+#                 {
+#                     "doi": s["doc_id"],
+#                     "year": s["page"],
+#                     "score": scores[i]
+#                 }
+#                 for i, s in enumerate(sources)
+#             ]
+#         }
+
+#         # Append to history file
+#         if HISTORY_FILE.exists():
+#             with open(HISTORY_FILE, "r") as f:
+#                 history = json.load(f)
+#         else:
+#             history = []
+
+#         history.append(history_entry)
+
+#         with open(HISTORY_FILE, "w") as f:
+#             json.dump(history, f, indent=2)
+
+#         st.success("📁 Query stored in history.")
 
 
 # import streamlit as st

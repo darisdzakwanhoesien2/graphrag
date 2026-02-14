@@ -20,17 +20,11 @@ from modules.rag_engine import generate_answer
 from modules.history_store import append_history
 
 
-# -------------------------------------------------
-# PAGE CONFIG
-# -------------------------------------------------
+NAMESPACE = "main"
 
 st.set_page_config(layout="wide")
 st.title("🌱 GraphRAG ESG Chatbot")
 
-
-# -------------------------------------------------
-# LOAD EMBEDDING MODEL (ONLY ONCE)
-# -------------------------------------------------
 
 @st.cache_resource
 def load_embedding_model():
@@ -40,7 +34,7 @@ embedding_model = load_embedding_model()
 
 
 # -------------------------------------------------
-# SIDEBAR SETTINGS
+# SIDEBAR
 # -------------------------------------------------
 
 st.sidebar.header("⚙️ LLM Settings")
@@ -50,40 +44,21 @@ provider = st.sidebar.selectbox(
     ["lmstudio", "openrouter"]
 )
 
-if provider == "lmstudio":
-    model = st.sidebar.selectbox(
-        "LMStudio Model",
-        ["mistralai/ministral-3-3b"]
-    )
-else:
-    model = st.sidebar.selectbox(
-        "OpenRouter Model",
-        [
-            "mistralai/devstral-2512:free",
-            "tngtech/deepseek-r1t2-chimera:free",
-            "qwen/qwen3-coder:free",
-            "nvidia/nemotron-3-nano-30b-a3b:free",
-            "meta-llama/llama-3.3-70b-instruct:free",
-            "openai/gpt-oss-120b:free",
-            "google/gemini-2.0-flash-exp:free",
-            "openai/gpt-oss-20b:free"
-        ]
-    )
-
+model = st.sidebar.text_input("Model", "mistralai/ministral-3-3b")
 temperature = st.sidebar.slider("Temperature", 0.0, 1.0, 0.2)
 top_k = st.sidebar.slider("Top K Retrieval", 1, 10, 5)
 
 
 # -------------------------------------------------
-# SYSTEM INITIALIZATION
+# INITIALIZATION
 # -------------------------------------------------
 
 def initialize_system():
 
-    processed = load_processed_reports()
-    index = load_index()
-    chunks = load_chunks()
-    graph = load_graph()
+    processed = load_processed_reports(NAMESPACE)
+    index = load_index(NAMESPACE)
+    chunks = load_chunks(NAMESPACE)
+    graph = load_graph(NAMESPACE)
 
     if chunks is None:
         chunks = []
@@ -91,39 +66,30 @@ def initialize_system():
     all_folders = get_report_folders()
     new_folders = [f for f in all_folders if f not in processed]
 
-    if new_folders:
-        st.write(f"📂 Processing new reports: {new_folders}")
+    for folder in new_folders:
+        docs = load_report(folder)
+        new_chunks = chunk_documents(docs)
 
-        for folder in new_folders:
-            docs = load_report(folder)
-            new_chunks = chunk_documents(docs)
+        index, chunks = build_or_update_index(
+            index=index,
+            existing_chunks=chunks,
+            new_chunks=new_chunks,
+            embedding_model=embedding_model
+        )
 
-            index, chunks = build_or_update_index(
-                index=index,
-                existing_chunks=chunks,
-                new_chunks=new_chunks,
-                embedding_model=embedding_model
-            )
+        graph = build_or_update_graph(graph, new_chunks)
+        processed.append(folder)
 
-            graph = build_or_update_graph(graph, new_chunks)
-            processed.append(folder)
-
-        save_index(index)
-        save_chunks(chunks)
-        save_graph(graph)
-        save_processed_reports(processed)
+    save_index(index, NAMESPACE)
+    save_chunks(chunks, NAMESPACE)
+    save_graph(graph, NAMESPACE)
+    save_processed_reports(processed, NAMESPACE)
 
     return index, chunks, graph
 
 
-# -------------------------------------------------
-# LOAD SYSTEM ONCE
-# -------------------------------------------------
-
 if "system_ready" not in st.session_state:
-
     index, chunks, graph = initialize_system()
-
     st.session_state.index = index
     st.session_state.chunks = chunks
     st.session_state.graph = graph
@@ -131,7 +97,7 @@ if "system_ready" not in st.session_state:
 
 
 # -------------------------------------------------
-# CHAT HISTORY (SESSION ONLY)
+# CHAT
 # -------------------------------------------------
 
 if "messages" not in st.session_state:
@@ -142,20 +108,12 @@ for msg in st.session_state.messages:
         st.write(msg["content"])
 
 
-# -------------------------------------------------
-# USER INPUT
-# -------------------------------------------------
-
 user_input = st.chat_input("Ask something about ESG...")
 
-if user_input and st.session_state.index is not None:
+if user_input and st.session_state.index:
 
-    # Save user message
-    st.session_state.messages.append(
-        {"role": "user", "content": user_input}
-    )
+    st.session_state.messages.append({"role": "user", "content": user_input})
 
-    # Generate answer
     result = generate_answer(
         query=user_input,
         vector_index=st.session_state.index,
@@ -171,46 +129,441 @@ if user_input and st.session_state.index is not None:
     sources = result["sources"]
     scores = result["scores"]
 
-    # Save assistant message
-    st.session_state.messages.append(
-        {"role": "assistant", "content": response}
-    )
+    st.session_state.messages.append({"role": "assistant", "content": response})
 
-    # Display response
     with st.chat_message("assistant"):
         st.write(response)
 
-    # Display sources
     with st.expander("📚 Sources Used"):
         for i, s in enumerate(sources):
-            st.write(
-                f"{s['doc_id']} | Page {s['page']} | Score: {scores[i]:.4f}"
-            )
+            st.write(f"{s['doc_id']} | Page {s['page']} | Score {scores[i]:.4f}")
 
-    # -------------------------------------------------
-    # STORE HISTORY (PERSISTENT)
-    # -------------------------------------------------
-
-    history_entry = {
+    append_history({
         "timestamp": datetime.utcnow().isoformat(),
+        "namespace": NAMESPACE,
         "query": user_input,
         "response": response,
         "provider": provider,
         "model": model,
-        "temperature": temperature,
-        "top_k": top_k,
-        "sources": [
-            {
-                "doc_id": s["doc_id"],
-                "page": s["page"],
-                "chunk_id": s["chunk_id"],
-                "score": scores[i]
-            }
-            for i, s in enumerate(sources)
-        ]
-    }
+        "sources": sources
+    })
 
-    append_history(history_entry)
+
+# import streamlit as st
+# from sentence_transformers import SentenceTransformer
+# from datetime import datetime
+
+# from modules.data_loader import get_report_folders, load_report
+# from modules.chunker import chunk_documents
+# from modules.vector_store import build_or_update_index
+# from modules.graph_builder import build_or_update_graph
+# from modules.persistence import (
+#     load_index,
+#     save_index,
+#     load_chunks,
+#     save_chunks,
+#     load_graph,
+#     save_graph,
+#     load_processed_reports,
+#     save_processed_reports
+# )
+# from modules.rag_engine import generate_answer
+# from modules.history_store import append_history
+
+
+# # -------------------------------------------------
+# # PAGE CONFIG
+# # -------------------------------------------------
+
+# st.set_page_config(layout="wide")
+# st.title("🌱 GraphRAG ESG Chatbot")
+
+
+# # -------------------------------------------------
+# # LOAD EMBEDDING MODEL
+# # -------------------------------------------------
+
+# @st.cache_resource
+# def load_embedding_model():
+#     return SentenceTransformer("all-MiniLM-L6-v2")
+
+# embedding_model = load_embedding_model()
+
+
+# # -------------------------------------------------
+# # SIDEBAR SETTINGS
+# # -------------------------------------------------
+
+# st.sidebar.header("⚙️ LLM Settings")
+
+# provider = st.sidebar.selectbox(
+#     "Provider",
+#     ["lmstudio", "openrouter"]
+# )
+
+# if provider == "lmstudio":
+#     model = st.sidebar.selectbox(
+#         "LMStudio Model",
+#         ["mistralai/ministral-3-3b"]
+#     )
+# else:
+#     model = st.sidebar.selectbox(
+#         "OpenRouter Model",
+#         [
+#             "mistralai/devstral-2512:free",
+#             "tngtech/deepseek-r1t2-chimera:free",
+#             "qwen/qwen3-coder:free",
+#             "nvidia/nemotron-3-nano-30b-a3b:free",
+#             "meta-llama/llama-3.3-70b-instruct:free",
+#             "openai/gpt-oss-120b:free",
+#             "google/gemini-2.0-flash-exp:free",
+#             "openai/gpt-oss-20b:free"
+#         ]
+#     )
+
+# temperature = st.sidebar.slider("Temperature", 0.0, 1.0, 0.2)
+# top_k = st.sidebar.slider("Top K Retrieval", 1, 10, 5)
+
+
+# # -------------------------------------------------
+# # SYSTEM INITIALIZATION
+# # -------------------------------------------------
+
+# def initialize_system():
+
+#     processed = load_processed_reports()
+#     index = load_index()
+#     chunks = load_chunks()
+#     graph = load_graph()
+
+#     if chunks is None:
+#         chunks = []
+
+#     all_folders = get_report_folders()
+#     new_folders = [f for f in all_folders if f not in processed]
+
+#     if new_folders:
+#         st.write(f"📂 Processing new reports: {new_folders}")
+
+#         for folder in new_folders:
+#             docs = load_report(folder)
+#             new_chunks = chunk_documents(docs)
+
+#             index, chunks = build_or_update_index(
+#                 index=index,
+#                 existing_chunks=chunks,
+#                 new_chunks=new_chunks,
+#                 embedding_model=embedding_model
+#             )
+
+#             graph = build_or_update_graph(graph, new_chunks)
+#             processed.append(folder)
+
+#         save_index(index)
+#         save_chunks(chunks)
+#         save_graph(graph)
+#         save_processed_reports(processed)
+
+#     return index, chunks, graph
+
+
+# if "system_ready" not in st.session_state:
+#     index, chunks, graph = initialize_system()
+
+#     st.session_state.index = index
+#     st.session_state.chunks = chunks
+#     st.session_state.graph = graph
+#     st.session_state.system_ready = True
+
+
+# # -------------------------------------------------
+# # CHAT HISTORY
+# # -------------------------------------------------
+
+# if "messages" not in st.session_state:
+#     st.session_state.messages = []
+
+# for msg in st.session_state.messages:
+#     with st.chat_message(msg["role"]):
+#         st.write(msg["content"])
+
+
+# # -------------------------------------------------
+# # USER INPUT
+# # -------------------------------------------------
+
+# user_input = st.chat_input("Ask something about ESG...")
+
+# if user_input and st.session_state.index is not None:
+
+#     st.session_state.messages.append(
+#         {"role": "user", "content": user_input}
+#     )
+
+#     result = generate_answer(
+#         query=user_input,
+#         vector_index=st.session_state.index,
+#         documents=st.session_state.chunks,
+#         embedding_model=embedding_model,
+#         provider=provider,
+#         model=model,
+#         temperature=temperature,
+#         top_k=top_k
+#     )
+
+#     response = result["response"]
+#     sources = result["sources"]
+#     scores = result["scores"]
+
+#     st.session_state.messages.append(
+#         {"role": "assistant", "content": response}
+#     )
+
+#     with st.chat_message("assistant"):
+#         st.write(response)
+
+#     with st.expander("📚 Sources Used"):
+#         for i, s in enumerate(sources):
+#             st.write(
+#                 f"{s['doc_id']} | Page {s['page']} | Score: {scores[i]:.4f}"
+#             )
+
+#     # Persist history
+#     history_entry = {
+#         "timestamp": datetime.utcnow().isoformat(),
+#         "query": user_input,
+#         "response": response,
+#         "provider": provider,
+#         "model": model,
+#         "temperature": temperature,
+#         "top_k": top_k,
+#         "sources": [
+#             {
+#                 "doc_id": s["doc_id"],
+#                 "page": s["page"],
+#                 "chunk_id": s["chunk_id"],
+#                 "score": scores[i]
+#             }
+#             for i, s in enumerate(sources)
+#         ]
+#     }
+
+#     append_history(history_entry)
+
+
+# import streamlit as st
+# from sentence_transformers import SentenceTransformer
+# from datetime import datetime
+
+# from modules.data_loader import get_report_folders, load_report
+# from modules.chunker import chunk_documents
+# from modules.vector_store import build_or_update_index
+# from modules.graph_builder import build_or_update_graph
+# from modules.persistence import (
+#     load_index,
+#     save_index,
+#     load_chunks,
+#     save_chunks,
+#     load_graph,
+#     save_graph,
+#     load_processed_reports,
+#     save_processed_reports
+# )
+# from modules.rag_engine import generate_answer
+# from modules.history_store import append_history
+
+
+# # -------------------------------------------------
+# # PAGE CONFIG
+# # -------------------------------------------------
+
+# st.set_page_config(layout="wide")
+# st.title("🌱 GraphRAG ESG Chatbot")
+
+
+# # -------------------------------------------------
+# # LOAD EMBEDDING MODEL (ONLY ONCE)
+# # -------------------------------------------------
+
+# @st.cache_resource
+# def load_embedding_model():
+#     return SentenceTransformer("all-MiniLM-L6-v2")
+
+# embedding_model = load_embedding_model()
+
+
+# # -------------------------------------------------
+# # SIDEBAR SETTINGS
+# # -------------------------------------------------
+
+# st.sidebar.header("⚙️ LLM Settings")
+
+# provider = st.sidebar.selectbox(
+#     "Provider",
+#     ["lmstudio", "openrouter"]
+# )
+
+# if provider == "lmstudio":
+#     model = st.sidebar.selectbox(
+#         "LMStudio Model",
+#         ["mistralai/ministral-3-3b"]
+#     )
+# else:
+#     model = st.sidebar.selectbox(
+#         "OpenRouter Model",
+#         [
+#             "mistralai/devstral-2512:free",
+#             "tngtech/deepseek-r1t2-chimera:free",
+#             "qwen/qwen3-coder:free",
+#             "nvidia/nemotron-3-nano-30b-a3b:free",
+#             "meta-llama/llama-3.3-70b-instruct:free",
+#             "openai/gpt-oss-120b:free",
+#             "google/gemini-2.0-flash-exp:free",
+#             "openai/gpt-oss-20b:free"
+#         ]
+#     )
+
+# temperature = st.sidebar.slider("Temperature", 0.0, 1.0, 0.2)
+# top_k = st.sidebar.slider("Top K Retrieval", 1, 10, 5)
+
+
+# # -------------------------------------------------
+# # SYSTEM INITIALIZATION
+# # -------------------------------------------------
+
+# def initialize_system():
+
+#     processed = load_processed_reports()
+#     index = load_index()
+#     chunks = load_chunks()
+#     graph = load_graph()
+
+#     if chunks is None:
+#         chunks = []
+
+#     all_folders = get_report_folders()
+#     new_folders = [f for f in all_folders if f not in processed]
+
+#     if new_folders:
+#         st.write(f"📂 Processing new reports: {new_folders}")
+
+#         for folder in new_folders:
+#             docs = load_report(folder)
+#             new_chunks = chunk_documents(docs)
+
+#             index, chunks = build_or_update_index(
+#                 index=index,
+#                 existing_chunks=chunks,
+#                 new_chunks=new_chunks,
+#                 embedding_model=embedding_model
+#             )
+
+#             graph = build_or_update_graph(graph, new_chunks)
+#             processed.append(folder)
+
+#         save_index(index)
+#         save_chunks(chunks)
+#         save_graph(graph)
+#         save_processed_reports(processed)
+
+#     return index, chunks, graph
+
+
+# # -------------------------------------------------
+# # LOAD SYSTEM ONCE
+# # -------------------------------------------------
+
+# if "system_ready" not in st.session_state:
+
+#     index, chunks, graph = initialize_system()
+
+#     st.session_state.index = index
+#     st.session_state.chunks = chunks
+#     st.session_state.graph = graph
+#     st.session_state.system_ready = True
+
+
+# # -------------------------------------------------
+# # CHAT HISTORY (SESSION ONLY)
+# # -------------------------------------------------
+
+# if "messages" not in st.session_state:
+#     st.session_state.messages = []
+
+# for msg in st.session_state.messages:
+#     with st.chat_message(msg["role"]):
+#         st.write(msg["content"])
+
+
+# # -------------------------------------------------
+# # USER INPUT
+# # -------------------------------------------------
+
+# user_input = st.chat_input("Ask something about ESG...")
+
+# if user_input and st.session_state.index is not None:
+
+#     # Save user message
+#     st.session_state.messages.append(
+#         {"role": "user", "content": user_input}
+#     )
+
+#     # Generate answer
+#     result = generate_answer(
+#         query=user_input,
+#         vector_index=st.session_state.index,
+#         documents=st.session_state.chunks,
+#         embedding_model=embedding_model,
+#         provider=provider,
+#         model=model,
+#         temperature=temperature,
+#         top_k=top_k
+#     )
+
+#     response = result["response"]
+#     sources = result["sources"]
+#     scores = result["scores"]
+
+#     # Save assistant message
+#     st.session_state.messages.append(
+#         {"role": "assistant", "content": response}
+#     )
+
+#     # Display response
+#     with st.chat_message("assistant"):
+#         st.write(response)
+
+#     # Display sources
+#     with st.expander("📚 Sources Used"):
+#         for i, s in enumerate(sources):
+#             st.write(
+#                 f"{s['doc_id']} | Page {s['page']} | Score: {scores[i]:.4f}"
+#             )
+
+#     # -------------------------------------------------
+#     # STORE HISTORY (PERSISTENT)
+#     # -------------------------------------------------
+
+#     history_entry = {
+#         "timestamp": datetime.utcnow().isoformat(),
+#         "query": user_input,
+#         "response": response,
+#         "provider": provider,
+#         "model": model,
+#         "temperature": temperature,
+#         "top_k": top_k,
+#         "sources": [
+#             {
+#                 "doc_id": s["doc_id"],
+#                 "page": s["page"],
+#                 "chunk_id": s["chunk_id"],
+#                 "score": scores[i]
+#             }
+#             for i, s in enumerate(sources)
+#         ]
+#     }
+
+#     append_history(history_entry)
 
 
 # import streamlit as st

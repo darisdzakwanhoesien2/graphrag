@@ -7,25 +7,27 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # -------------------------------------------------
-# INTERNAL HELPER
+# INTERNAL HELPERS
 # -------------------------------------------------
 
-def _pkl_path(namespace, name):
+def _pkl_path(namespace: str, name: str):
     return DATA_DIR / f"{namespace}_{name}.pkl"
 
-def _json_path(namespace, name):
+
+def _json_path(namespace: str, name: str):
     return DATA_DIR / f"{namespace}_{name}.json"
 
 
 # -------------------------------------------------
-# INDEX
+# VECTOR INDEX
 # -------------------------------------------------
 
-def save_index(index, namespace):
+def save_index(index, namespace: str):
     with open(_pkl_path(namespace, "index"), "wb") as f:
         pickle.dump(index, f)
 
-def load_index(namespace):
+
+def load_index(namespace: str):
     path = _pkl_path(namespace, "index")
     if path.exists():
         with open(path, "rb") as f:
@@ -37,11 +39,12 @@ def load_index(namespace):
 # CHUNKS
 # -------------------------------------------------
 
-def save_chunks(chunks, namespace):
+def save_chunks(chunks, namespace: str):
     with open(_pkl_path(namespace, "chunks"), "wb") as f:
         pickle.dump(chunks, f)
 
-def load_chunks(namespace):
+
+def load_chunks(namespace: str):
     path = _pkl_path(namespace, "chunks")
     if path.exists():
         with open(path, "rb") as f:
@@ -53,11 +56,12 @@ def load_chunks(namespace):
 # GRAPH
 # -------------------------------------------------
 
-def save_graph(graph, namespace):
+def save_graph(graph, namespace: str):
     with open(_pkl_path(namespace, "graph"), "wb") as f:
         pickle.dump(graph, f)
 
-def load_graph(namespace):
+
+def load_graph(namespace: str):
     path = _pkl_path(namespace, "graph")
     if path.exists():
         with open(path, "rb") as f:
@@ -69,16 +73,100 @@ def load_graph(namespace):
 # PROCESSED REPORTS
 # -------------------------------------------------
 
-def save_processed_reports(reports, namespace):
+def save_processed_reports(reports, namespace: str):
     with open(_json_path(namespace, "processed"), "w") as f:
         json.dump(reports, f)
 
-def load_processed_reports(namespace):
+
+def load_processed_reports(namespace: str):
     path = _json_path(namespace, "processed")
     if path.exists():
         with open(path, "r") as f:
             return json.load(f)
     return []
+
+
+# import pickle
+# import json
+# from pathlib import Path
+
+# DATA_DIR = Path("data/processed")
+# DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# # -------------------------------------------------
+# # INTERNAL HELPER
+# # -------------------------------------------------
+
+# def _pkl_path(namespace, name):
+#     return DATA_DIR / f"{namespace}_{name}.pkl"
+
+# def _json_path(namespace, name):
+#     return DATA_DIR / f"{namespace}_{name}.json"
+
+
+# # -------------------------------------------------
+# # INDEX
+# # -------------------------------------------------
+
+# def save_index(index, namespace):
+#     with open(_pkl_path(namespace, "index"), "wb") as f:
+#         pickle.dump(index, f)
+
+# def load_index(namespace):
+#     path = _pkl_path(namespace, "index")
+#     if path.exists():
+#         with open(path, "rb") as f:
+#             return pickle.load(f)
+#     return None
+
+
+# # -------------------------------------------------
+# # CHUNKS
+# # -------------------------------------------------
+
+# def save_chunks(chunks, namespace):
+#     with open(_pkl_path(namespace, "chunks"), "wb") as f:
+#         pickle.dump(chunks, f)
+
+# def load_chunks(namespace):
+#     path = _pkl_path(namespace, "chunks")
+#     if path.exists():
+#         with open(path, "rb") as f:
+#             return pickle.load(f)
+#     return []
+
+
+# # -------------------------------------------------
+# # GRAPH
+# # -------------------------------------------------
+
+# def save_graph(graph, namespace):
+#     with open(_pkl_path(namespace, "graph"), "wb") as f:
+#         pickle.dump(graph, f)
+
+# def load_graph(namespace):
+#     path = _pkl_path(namespace, "graph")
+#     if path.exists():
+#         with open(path, "rb") as f:
+#             return pickle.load(f)
+#     return None
+
+
+# # -------------------------------------------------
+# # PROCESSED REPORTS
+# # -------------------------------------------------
+
+# def save_processed_reports(reports, namespace):
+#     with open(_json_path(namespace, "processed"), "w") as f:
+#         json.dump(reports, f)
+
+# def load_processed_reports(namespace):
+#     path = _json_path(namespace, "processed")
+#     if path.exists():
+#         with open(path, "r") as f:
+#             return json.load(f)
+#     return []
 
 
 # import pickle

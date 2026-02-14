@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 from sentence_transformers import SentenceTransformer
+from datetime import datetime
+import json
+from pathlib import Path
 
 from modules.chunker import chunk_documents
 from modules.vector_store import build_or_update_index
@@ -16,18 +19,23 @@ from modules.persistence import (
 from modules.rag_engine import generate_answer
 
 
-# -------------------------------------------------
+# =================================================
 # CONFIG
-# -------------------------------------------------
+# =================================================
 
 NAMESPACE = "abstract"
 
-st.title("📄 Abstract Journal GraphRAG (CSV Version)")
+HISTORY_DIR = Path("data/processed/abstract")
+HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+HISTORY_FILE = HISTORY_DIR / "query_history.json"
 
 
-# -------------------------------------------------
+st.title("📄 Abstract Journal GraphRAG (CSV)")
+
+
+# =================================================
 # LOAD EMBEDDING MODEL
-# -------------------------------------------------
+# =================================================
 
 @st.cache_resource
 def load_embedding_model():
@@ -36,9 +44,9 @@ def load_embedding_model():
 embedding_model = load_embedding_model()
 
 
-# -------------------------------------------------
+# =================================================
 # SAFE SESSION INIT
-# -------------------------------------------------
+# =================================================
 
 if "abstract_index" not in st.session_state:
     st.session_state.abstract_index = load_index(NAMESPACE)
@@ -50,9 +58,9 @@ if "abstract_graph" not in st.session_state:
     st.session_state.abstract_graph = load_graph(NAMESPACE)
 
 
-# -------------------------------------------------
+# =================================================
 # CSV UPLOAD
-# -------------------------------------------------
+# =================================================
 
 uploaded_file = st.file_uploader("Upload CSV with Abstracts", type=["csv"])
 
@@ -60,9 +68,7 @@ if uploaded_file:
 
     df = pd.read_csv(uploaded_file)
 
-    required_column = "Abstract"
-
-    if required_column not in df.columns:
+    if "Abstract" not in df.columns:
         st.error("CSV must contain an 'Abstract' column.")
         st.stop()
 
@@ -72,7 +78,6 @@ if uploaded_file:
 
         abstract_text = row["Abstract"]
 
-        # Skip missing abstracts
         if pd.isna(abstract_text) or abstract_text == "(missing abstract)":
             continue
 
@@ -85,34 +90,38 @@ if uploaded_file:
             "journal": row.get("Journal", "")
         })
 
-    new_chunks = chunk_documents(documents)
+    if len(documents) == 0:
+        st.warning("No valid abstracts found in CSV.")
+    else:
 
-    index, chunks = build_or_update_index(
-        index=st.session_state.abstract_index,
-        existing_chunks=st.session_state.abstract_chunks or [],
-        new_chunks=new_chunks,
-        embedding_model=embedding_model
-    )
+        new_chunks = chunk_documents(documents)
 
-    graph = build_or_update_graph(
-        st.session_state.abstract_graph,
-        new_chunks
-    )
+        index, chunks = build_or_update_index(
+            index=st.session_state.abstract_index,
+            existing_chunks=st.session_state.abstract_chunks or [],
+            new_chunks=new_chunks,
+            embedding_model=embedding_model
+        )
 
-    save_index(index, NAMESPACE)
-    save_chunks(chunks, NAMESPACE)
-    save_graph(graph, NAMESPACE)
+        graph = build_or_update_graph(
+            st.session_state.abstract_graph,
+            new_chunks
+        )
 
-    st.session_state.abstract_index = index
-    st.session_state.abstract_chunks = chunks
-    st.session_state.abstract_graph = graph
+        save_index(index, NAMESPACE)
+        save_chunks(chunks, NAMESPACE)
+        save_graph(graph, NAMESPACE)
 
-    st.success(f"✅ Indexed {len(documents)} abstracts successfully!")
+        st.session_state.abstract_index = index
+        st.session_state.abstract_chunks = chunks
+        st.session_state.abstract_graph = graph
+
+        st.success(f"✅ Indexed {len(documents)} abstracts successfully!")
 
 
-# -------------------------------------------------
-# QUERY
-# -------------------------------------------------
+# =================================================
+# QUERY SECTION
+# =================================================
 
 query = st.text_input("Ask about the uploaded abstracts")
 
@@ -122,30 +131,224 @@ if query:
         st.warning("⚠️ No abstracts indexed yet.")
     else:
 
+        provider = "lmstudio"
+        model = "mistralai/ministral-3-3b"
+        temperature = 0.2
+        top_k = 5
+
         result = generate_answer(
             query=query,
             vector_index=st.session_state.abstract_index,
             documents=st.session_state.abstract_chunks,
             embedding_model=embedding_model,
-            provider="lmstudio",
-            model="mistralai/ministral-3-3b",
-            temperature=0.2,
-            top_k=5
+            provider=provider,
+            model=model,
+            temperature=temperature,
+            top_k=top_k
         )
 
+        response = result["response"]
+        sources = result["sources"]
+        scores = result["scores"]
+
         st.write("### 🧠 Answer")
-        st.write(result["response"])
+        st.write(response)
 
         with st.expander("📚 Sources Used"):
 
-            for i, s in enumerate(result["sources"]):
+            for i, s in enumerate(sources):
 
-                # find metadata from original chunk
                 st.markdown(f"""
 **DOI:** {s['doc_id']}  
 **Year:** {s['page']}  
-**Score:** {result['scores'][i]:.4f}  
+**Score:** {scores[i]:.4f}  
 """)
+
+        # =================================================
+        # STORE QUERY HISTORY
+        # =================================================
+
+        history_entry = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "query": query,
+            "provider": provider,
+            "model": model,
+            "temperature": temperature,
+            "top_k": top_k,
+            "response": response,
+            "sources": [
+                {
+                    "doi": s["doc_id"],
+                    "year": s["page"],
+                    "score": scores[i]
+                }
+                for i, s in enumerate(sources)
+            ]
+        }
+
+        # Append to history file
+        if HISTORY_FILE.exists():
+            with open(HISTORY_FILE, "r") as f:
+                history = json.load(f)
+        else:
+            history = []
+
+        history.append(history_entry)
+
+        with open(HISTORY_FILE, "w") as f:
+            json.dump(history, f, indent=2)
+
+        st.success("📁 Query stored in history.")
+
+
+# import streamlit as st
+# import pandas as pd
+# from sentence_transformers import SentenceTransformer
+
+# from modules.chunker import chunk_documents
+# from modules.vector_store import build_or_update_index
+# from modules.graph_builder import build_or_update_graph
+# from modules.persistence import (
+#     load_index,
+#     save_index,
+#     load_chunks,
+#     save_chunks,
+#     load_graph,
+#     save_graph
+# )
+# from modules.rag_engine import generate_answer
+
+
+# # -------------------------------------------------
+# # CONFIG
+# # -------------------------------------------------
+
+# NAMESPACE = "abstract"
+
+# st.title("📄 Abstract Journal GraphRAG (CSV Version)")
+
+
+# # -------------------------------------------------
+# # LOAD EMBEDDING MODEL
+# # -------------------------------------------------
+
+# @st.cache_resource
+# def load_embedding_model():
+#     return SentenceTransformer("all-MiniLM-L6-v2")
+
+# embedding_model = load_embedding_model()
+
+
+# # -------------------------------------------------
+# # SAFE SESSION INIT
+# # -------------------------------------------------
+
+# if "abstract_index" not in st.session_state:
+#     st.session_state.abstract_index = load_index(NAMESPACE)
+
+# if "abstract_chunks" not in st.session_state:
+#     st.session_state.abstract_chunks = load_chunks(NAMESPACE)
+
+# if "abstract_graph" not in st.session_state:
+#     st.session_state.abstract_graph = load_graph(NAMESPACE)
+
+
+# # -------------------------------------------------
+# # CSV UPLOAD
+# # -------------------------------------------------
+
+# uploaded_file = st.file_uploader("Upload CSV with Abstracts", type=["csv"])
+
+# if uploaded_file:
+
+#     df = pd.read_csv(uploaded_file)
+
+#     required_column = "Abstract"
+
+#     if required_column not in df.columns:
+#         st.error("CSV must contain an 'Abstract' column.")
+#         st.stop()
+
+#     documents = []
+
+#     for _, row in df.iterrows():
+
+#         abstract_text = row["Abstract"]
+
+#         # Skip missing abstracts
+#         if pd.isna(abstract_text) or abstract_text == "(missing abstract)":
+#             continue
+
+#         documents.append({
+#             "doc_id": row.get("DOI", "Unknown DOI"),
+#             "page": row.get("Year", 0),
+#             "text": abstract_text,
+#             "title": row.get("Title", ""),
+#             "authors": row.get("Authors", ""),
+#             "journal": row.get("Journal", "")
+#         })
+
+#     new_chunks = chunk_documents(documents)
+
+#     index, chunks = build_or_update_index(
+#         index=st.session_state.abstract_index,
+#         existing_chunks=st.session_state.abstract_chunks or [],
+#         new_chunks=new_chunks,
+#         embedding_model=embedding_model
+#     )
+
+#     graph = build_or_update_graph(
+#         st.session_state.abstract_graph,
+#         new_chunks
+#     )
+
+#     save_index(index, NAMESPACE)
+#     save_chunks(chunks, NAMESPACE)
+#     save_graph(graph, NAMESPACE)
+
+#     st.session_state.abstract_index = index
+#     st.session_state.abstract_chunks = chunks
+#     st.session_state.abstract_graph = graph
+
+#     st.success(f"✅ Indexed {len(documents)} abstracts successfully!")
+
+
+# # -------------------------------------------------
+# # QUERY
+# # -------------------------------------------------
+
+# query = st.text_input("Ask about the uploaded abstracts")
+
+# if query:
+
+#     if st.session_state.abstract_index is None:
+#         st.warning("⚠️ No abstracts indexed yet.")
+#     else:
+
+#         result = generate_answer(
+#             query=query,
+#             vector_index=st.session_state.abstract_index,
+#             documents=st.session_state.abstract_chunks,
+#             embedding_model=embedding_model,
+#             provider="lmstudio",
+#             model="mistralai/ministral-3-3b",
+#             temperature=0.2,
+#             top_k=5
+#         )
+
+#         st.write("### 🧠 Answer")
+#         st.write(result["response"])
+
+#         with st.expander("📚 Sources Used"):
+
+#             for i, s in enumerate(result["sources"]):
+
+#                 # find metadata from original chunk
+#                 st.markdown(f"""
+# **DOI:** {s['doc_id']}  
+# **Year:** {s['page']}  
+# **Score:** {result['scores'][i]:.4f}  
+# """)
 
 
 # import streamlit as st

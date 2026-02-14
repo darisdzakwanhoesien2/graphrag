@@ -1,0 +1,38 @@
+[
+  {
+    "timestamp": "2026-02-14T08:57:50.411808",
+    "query": "What are some methodology implemented here?",
+    "provider": "lmstudio",
+    "model": "mistralai/ministral-3-3b",
+    "temperature": 0.2,
+    "top_k": 5,
+    "response": "Based solely on the provided context, the methodology implemented appears to involve:\n\n1. **Sustainability Report Analysis Framework**:\n   - Utilization of **Global Reporting Initiative (GRI) Standards** compliance as a benchmark for evaluating sustainability disclosures.\n\n2. **Automated Reference Extraction & Annotation System**:\n   - Development of an AI-driven or computational approach to:\n     - Identify references within sustainability reports.\n     - Record the **page numbers** where each topic is discussed.\n     - Classify the **contextual meaning** (e.g., positive, negative) of these references.\n\n3. **Ground Truth Validation**:\n   - Manual annotation process conducted on **134 sustainability reports** to establish a benchmark (\"ground truth\") for evaluating the automated system\u2019s accuracy.\n\n4. **Evaluation & Comparative Analysis**:\n   - Assessment of the automated system\u2019s output against the manually annotated ground truth.\n   - Focus on metrics like **affordability, accessibility, and transparency improvements**, enabling stakeholders to conduct further analysis.\n\n### Key Strengths (from Context):\n- **Scalability**: The approach is designed for broad applicability across multiple reports.\n- **Stakeholder Empowerment**: Enhances decision-making by providing structured, transparent data extraction.",
+    "sources": [
+      {
+        "doi": "(missing DOI)",
+        "year": 2022,
+        "score": 0.5949140787124634
+      },
+      {
+        "doi": "(missing DOI)",
+        "year": 2022,
+        "score": 0.5949140787124634
+      },
+      {
+        "doi": "(missing DOI)",
+        "year": 2022,
+        "score": 0.5949140787124634
+      },
+      {
+        "doi": "(missing DOI)",
+        "year": 2022,
+        "score": 0.5949140787124634
+      },
+      {
+        "doi": "(missing DOI)",
+        "year": 2022,
+        "score": 0.7106587886810303
+      }
+    ]
+  }
+]

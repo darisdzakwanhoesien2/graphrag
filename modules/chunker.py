@@ -27,27 +27,3 @@ def chunk_documents(documents):
             })
 
     return all_chunks
-
-
-# from langchain.text_splitter import RecursiveCharacterTextSplitter
-
-# def chunk_documents(documents):
-#     splitter = RecursiveCharacterTextSplitter(
-#         chunk_size=800,
-#         chunk_overlap=150
-#     )
-
-#     chunks = []
-
-#     for doc in documents:
-#         splits = splitter.split_text(doc["text"])
-
-#         for i, chunk in enumerate(splits):
-#             chunks.append({
-#                 "chunk_id": f"{doc['doc_id']}_p{doc['page']}_c{i}",
-#                 "doc_id": doc["doc_id"],
-#                 "page": doc["page"],
-#                 "text": chunk
-#             })
-
-#     return chunks

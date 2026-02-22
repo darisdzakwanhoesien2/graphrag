@@ -1,4 +1,6 @@
 https://chatgpt.com/c/698fed59-260c-8323-bc2c-5267505d3e54
+https://chatgpt.com/c/699023b2-3948-8322-bd18-8d0ae2b04874
+https://chatgpt.com/c/698ff6bc-8508-839e-91ee-fb37f5969a90
 
 You’re right — what you pasted is missing glue logic, metadata wiring, hybrid scoring, and graph-aware ranking.
 Let’s fix this properly.
